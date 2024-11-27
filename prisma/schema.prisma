@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  // url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             Int             @id @default(autoincrement())
+  email          String          @unique
+  password       String
+  createdAt      DateTime        @default(now())
+  records        Record[]        @relation("UserRecords") // Relation to Record model
+  paymentMethods PaymentMethod[] @relation("UserPaymentMethods") // Relation to PaymentMethod model
+}
+
+model Record {
+  id         Int      @id @default(autoincrement())
+  impression Int
+  clicks     Int
+  cpm        Int
+  earnings   Int
+  userId     Int // Foreign key field
+  user       User     @relation(fields: [userId], references: [id], name: "UserRecords")
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, createdAt]) // Composite unique constraint
+}
+
+model PaymentMethod {
+  id          Int    @id @default(autoincrement()) @unique
+  type        String
+  bankName    String?
+  bankNumber  String?
+  ifscCode    String?
+  holderName  String?
+  upiId       String?
+  paypalEmail String?
+  userId      Int @unique
+  user        User   @relation(fields: [userId], references: [id], name: "UserPaymentMethods")
+}
