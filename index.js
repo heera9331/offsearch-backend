@@ -2,7 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import { generateToken, checkUser } from "./utils.js";
 import { authenticate } from "./middelwares/auth.js";
-import { prisma } from "./lib/prisma.js";
+// import { prisma } from "./lib/prisma.js";
 import bodyParser from "body-parser";
 import cors from "cors";
 import { connectDB } from "./lib/mongo.js";
@@ -284,8 +284,8 @@ app.post("/payment-method", checkUser, async (req, res, next) => {
       return res.status(500).json({ error: "Payment method already exist." });
     }
 
-    const newPaymentMethod = await prisma.paymentMethod.create({
-      data: {
+    const newPaymentMethod = await PaymentMethod.insertMany([
+      {
         type,
         bankName,
         bankNumber,
@@ -295,7 +295,7 @@ app.post("/payment-method", checkUser, async (req, res, next) => {
         paypalEmail,
         userId,
       },
-    });
+    ]);
 
     return res.json({
       paymentMethod: newPaymentMethod,
