@@ -11,7 +11,7 @@ const checkUser = (req, res, next) => {
   if (!userId) {
     return res.status(401).json({ error: "User ID is required in headers." });
   }
-  req.userId = parseInt(userId, 10);
+  req.userId = userId;
   next();
 };
 

@@ -5,6 +5,9 @@ import { authenticate } from "./middelwares/auth.js";
 import { prisma } from "./lib/prisma.js";
 import bodyParser from "body-parser";
 import cors from "cors";
+import { connectDB } from "./lib/mongo.js";
+import { User, Record, PaymentMethod } from "./models/index.js";
+import jwt from "jsonwebtoken";
 
 dotenv.config();
 
@@ -18,32 +21,57 @@ app.get("/", async (req, res, next) => {
   return res.json({ meseage: "working" });
 });
 
-app.get("users", authenticate, async (req, res, next) => {});
+app.get("user", authenticate, async (req, res, next) => {});
+
+app.post("user", authenticate, async (req, res, next) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(404).json({ error: "Email or password missing" });
+    }
+    const user = await User.insertMany([{ email, password }]);
+    return res.json({ user });
+  } catch (error) {
+    console.log(error);
+    return res.status(505).json({ error });
+  }
+});
 
 app.post("/login", async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    const user = await prisma.user.findUnique({
-      where: {
-        email,
-      },
-    });
-
-    if (user.password !== password) {
-      return res.status(500).json({ error: "user password not correct" });
+    console.log(email, password);
+    if (!email || !password) {
+      return res.status(400).json({ error: "Email and password are required" });
     }
 
+    const user = await User.findOne({ email });
+    console.log(user);
+
+    if (!user) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // Validate password
+    const isPasswordValid = user.password === password;
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    // Generate JWT
     const payload = { id: user.id, email: user.email };
-    const token = generateToken(payload);
+    const token = jwt.sign(payload, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
 
     return res.json({
-      message: "user logined",
+      message: "User logged in",
       user: { id: user.id, email: user.email },
       token,
     });
   } catch (error) {
-    console.log(error);
-    return res.status(500).json(error);
+    console.error(error);
+    return res.status(500).json({ error: "An unexpected error occurred" });
   }
 });
 
@@ -51,13 +79,12 @@ app.post("/register", async (req, res, next) => {
   const { email, password } = req.body;
 
   try {
-    const newUser = await prisma.user.create({
-      data: {
+    const newUser = await User.insertMany([
+      {
         email,
         password,
       },
-    });
-
+    ]);
     return res.json({ user: newUser });
   } catch (error) {
     console.log(error);
@@ -65,13 +92,12 @@ app.post("/register", async (req, res, next) => {
   }
 });
 
-// Get all records for the authenticated user
 app.get("/user", checkUser, async (req, res) => {
   try {
-    const records = await prisma.user.findMany({});
-    res.json(records);
+    const users = await User.find({});
+    res.json(users);
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch records." });
+    res.status(500).json({ error: "Failed to fetch users." });
   }
 });
 
@@ -79,29 +105,28 @@ app.post("/user", async (req, res) => {
   try {
     const { email, password } = req.body;
     try {
-      const newUser = await prisma.user.create({
-        data: {
+      const newUser = await User.insertMany([
+        {
           email,
           password,
         },
-      });
+      ]);
 
       return res.json({ user: newUser });
     } catch (error) {
       console.log(error);
-      res.status(500).json({ error: "Failed to fetch records." });
+      res.status(500).json({ error: "User already exist" });
     }
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch records." });
+    console.log(error);
+    res.status(500).json({ error });
   }
 });
 
 // Get all records for the authenticated user
 app.get("/record", checkUser, async (req, res) => {
   try {
-    const records = await prisma.record.findMany({
-      where: { userId: req.userId },
-    });
+    const records = await Record.find({ userId: req.userId });
     res.json(records);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch records." });
@@ -109,22 +134,23 @@ app.get("/record", checkUser, async (req, res) => {
 });
 
 // Create a new record
-app.post("/record", checkUser, async (req, res) => {
-  const { impression, clicks, cpm, earnings, createdAt } = req.body;
+app.post("/record", async (req, res) => {
+  const { impression, clicks, cpm, earnings, createdAt, userId } = req.body;
 
   try {
-    const newRecord = await prisma.record.create({
-      data: {
+    const newRecord = await Record.insertMany([
+      {
         impression,
         clicks,
         cpm,
         earnings,
-        createdAt: new Date(createdAt), // Parse date from request
-        userId: req.userId,
+        createdAt: new Date(createdAt),
+        userId
       },
-    });
-    res.status(201).json(newRecord);
+    ]);
+    return res.status(201).json(newRecord);
   } catch (error) {
+    console.log(error);
     if (error.code === "P2002") {
       // Unique constraint violation
       res.status(400).json({ error: "Record for this date already exists." });
@@ -140,18 +166,10 @@ app.put("/record:id", checkUser, async (req, res) => {
   const { impression, clicks, cpm, earnings } = req.body;
 
   try {
-    const updatedRecord = await prisma.record.updateMany({
-      where: {
-        id: parseInt(id, 10),
-        userId: req.userId, // Ensure the record belongs to the user
-      },
-      data: {
-        impression,
-        clicks,
-        cpm,
-        earnings,
-      },
-    });
+    const updatedRecord = await Record.UpdateOne(
+      { _id: id },
+      { impression, clicks, cpm, earnings }
+    );
 
     if (updatedRecord.count === 0) {
       return res
@@ -170,14 +188,8 @@ app.delete("record/:id", checkUser, async (req, res) => {
   const { id } = req.params;
 
   try {
-    const deletedRecord = await prisma.record.deleteMany({
-      where: {
-        id: parseInt(id, 10),
-        userId: req.userId, // Ensure the record belongs to the user
-      },
-    });
-
-    if (deletedRecord.count === 0) {
+    const deletedRecord = await Record.deleteOne({ _id: id });
+    if (deletedRecord) {
       return res
         .status(404)
         .json({ error: "Record not found or access denied." });
@@ -196,7 +208,7 @@ app.post("/logout", (req, res) => {
 
 app.get("/payment-method/", checkUser, async (req, res, next) => {
   try {
-    const methods = await prisma.paymentMethod.findMany({});
+    const methods = await PaymentMethod.find({});
 
     if (!methods) {
       return res.status(404).json({ error: "No payment method not found" }); // Use 404 status for "not found"
@@ -219,10 +231,9 @@ app.get("/payment-method/:id", checkUser, async (req, res, next) => {
     const { id } = req.params; // Use id from params and treat it as type
     const userId = req.userId; // Ensure this is the correct user ID extraction
 
-    const method = await prisma.paymentMethod.findUnique({
-      where: {
-        id,
-      },
+    const method = await Record.findOne({
+      _id: id,
+      userId,
     });
 
     if (!method) {
@@ -253,10 +264,11 @@ app.post("/payment-method", checkUser, async (req, res, next) => {
       paypalEmail,
     } = req.body;
 
-    const isExists = await prisma.paymentMethod.findUnique({
-      where: {
-        userId: req.userId,
-      },
+    const userId = req.userId;
+
+    const isExists = await PaymentMethod.findOne({
+      userId,
+      type,
     });
 
     if (isExists) {
@@ -272,7 +284,7 @@ app.post("/payment-method", checkUser, async (req, res, next) => {
         holderName,
         upiId,
         paypalEmail,
-        userId: req.userId,
+        userId,
       },
     });
 
@@ -288,6 +300,7 @@ app.post("/payment-method", checkUser, async (req, res, next) => {
   }
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`server running on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", async () => {
+  console.log(`server running on port http://localhost:${PORT}`);
+  await connectDB();
 });
