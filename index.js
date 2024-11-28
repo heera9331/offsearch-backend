@@ -133,6 +133,15 @@ app.get("/record", checkUser, async (req, res) => {
   }
 });
 
+app.get("/records", async (req, res) => {
+  try {
+    const records = await Record.find({});
+    res.json(records);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch records." });
+  }
+});
+
 // Create a new record
 app.post("/record", async (req, res) => {
   const { impression, clicks, cpm, earnings, createdAt, userId } = req.body;
@@ -145,7 +154,7 @@ app.post("/record", async (req, res) => {
         cpm,
         earnings,
         createdAt: new Date(createdAt),
-        userId
+        userId,
       },
     ]);
     return res.status(201).json(newRecord);
